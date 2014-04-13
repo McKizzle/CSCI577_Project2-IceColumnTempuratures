@@ -43,9 +43,11 @@ class IceColumn:
         self.lmbda = 7.0e-3     #temp. lapse rate:      degrees / m
         # horizonatal temperature gradient ?? -- this is confusing me!
         self.Q_geo = -3.2e-2     #geothermal heat flow:  W / m**2
+        self.Q_f = self.frictional_heat()
+        self.Q_total = self.Q_geo + self.Q_f
 
         # calculate the pressure melting point for the ice sheet.
-        self.theta_pmp = -self.pressure_melting_point() #self.beta * self.lrho * (self.z_s - self.z_b)
+        self.theta_pmp = self.pressure_melting_point() #self.beta * self.lrho * (self.z_s - self.z_b)
 
         # calcualte sigma(z)
         self.sig_z = self.rescaled_vertical_coord()
@@ -76,8 +78,12 @@ class IceColumn:
 
         # Initialize RHS variables. 
         D = self.diffusion_matrix()
-        D[-1, -1] = self.Q_geo
-        A = self.advection_matrix2() / spy
+        D[-1, -1] = self.Q_total
+        print "Diffusion: "
+        print D.todense()
+        print "Advection: "
+        print self.advection_matrix().todense()
+        A = self.advection_matrix() / spy
         w_z = self.w_z
         u_z = self.u_z / spy
         
@@ -102,8 +108,6 @@ class IceColumn:
         R = R * k / (lrho * Cp * dz ** 2)
         R[0,:] = np.zeros(self.N)
         R[-1,:] = np.zeros(self.N)
-        R[0, 0] = 0.0
-        R[-1, -1] = 0.0#self.Q_geo
 
         return R
 
@@ -111,75 +115,34 @@ class IceColumn:
         """ Construct the advection matrix operator """
         M = sprs.lil_matrix((self.N, self.N))
         dz = self.dz
-        v = -self.aacc # depth is positive in modle. Therefore 'negify' a acent
+        v = self.aacc 
 
         # Upwinding
         """ Upwind formula from the wiki """
         A = sprs.lil_matrix((self.N, self.N)) 
         if v < 0:
-            print "v less than zero"
             A.setdiag(np.ones(self.N) * -1.0)
             A.setdiag(np.ones(self.N), k=1)
         elif v == 0:
-            print "v equal to zero"
             A = A * 0
         elif v > 0:
-            print "v greater than zero"
             A.setdiag(np.ones(self.N) * -1.0, k=-1)
             A.setdiag(np.ones(self.N))
         
         A[0,:] = np.zeros(self.N)
         A[-1,:] = np.zeros(self.N)
-        A[0, 0] = 0
-        A[-1, -1] = 0
- 
         A = A / (2 * dz)
-
-        return A
-
-    def advection_matrix2(self):
-        """ Construct the advection matrix operator """
-        M = sprs.lil_matrix((self.N, self.N))
-        dz = self.dz
-        v = -self.aacc 
-
-        B = self.advection_matrix()
-
-        A = sprs.lil_matrix((self.N, self.N))
-        A.setdiag(np.ones(self.N) *  3.0, k= 0)
-        A.setdiag(np.ones(self.N) * -4.0, k=-1)
-        A.setdiag(np.ones(self.N)       , k=-2)
-
         
-        A[0,:] = np.zeros(self.N)
-        A[-1,:] = np.zeros(self.N)
-        A[0, 0] = 0.0
-        A[-1,-1] = 0.0
-        A = A / (2 * dz)
-        #A[-1, -1] = 10self.Q_geo
+        # Set up the final row so that it can handle the 
+        # diffusion from the Q_geo
+        B = sprs.lil_matrix((self.N, self.N))
+        B.setdiag(np.ones(self.N) *  3.0, k= 0)
+        B.setdiag(np.ones(self.N) * -4.0, k=-1)
+        B.setdiag(np.ones(self.N)       , k=-2)
+        B = B / (2 * dz)
+        A[-1,:] = B[-1, :]
 
-        A[1,:] = B[1,:]
-        A[2,:] = B[2,:]
-
-        print A.todense()
-        return A
-        
-
-    #def correct_boundary(self, theta):  
-    #    if theta[-1] >= self.theta_pmp:
-    #        theta[-1] = self.theta_pmp
-    #        return theta 
-    #    
-    #    theta1 = 1.0 / 3.0 * ( self.Q_geo * 2.0 * self.dz / self.k + 4.0 * theta[-2] - theta[-3])
-    #    #theta2 = 1.0 / 4.0 * ( self.Q_geo * 2.0 * self.dz / self.k + 3.0 * theta[-1] + theta[-3])
-    #    #theta3 =               self.Q_geo * 2.0 * self.dz / self.k + 3.0 * theta[-1] + theta[-2]
-
-    #    
-    #    theta[-1] = theta1
-    #    #theta[-2] = theta2
-    #    #theta[-3] = theta3
-
-    #    return theta
+        return A 
 
     def correct_boundary(self, theta, M):
         if theta[-1] >= self.theta_pmp:
@@ -190,7 +153,6 @@ class IceColumn:
 
     def rhs(self, t, y, D, A, w_z, u_z): 
         D, y = self.correct_boundary(y, D) # remove the geothermal heatflow once the tempurature is at theta_pmp
-
 
         ptpt_d = (D * y)
         self.check_end(ptpt_d, "D")
@@ -266,7 +228,7 @@ class IceColumn:
                 $ \Theta_{PMP} = \beta \rho g(z_s - z_b) $
             :param Z: numpy array of depths.  
         """ 
-        return self.beta * self.lrho * (self.Z[0] - self.Z[-1])
+        return self.beta * self.lrho * self.g * (self.Z[0] - self.Z[-1])
 
     def horizontal_velocity(self):
         """ Horizontal ice velocity at depth
@@ -313,6 +275,10 @@ class IceColumn:
             (self.Z[0] - self.Z) * self.vertical_shear() * pz_spx 
 
         return phi_z
+
+    def frictional_heat(self):
+        """ Calculate the frictional heat at the base of the glacier"""
+        return self.lrho * self.g * (self.Z[0] - self.Z[-1]) * np.sin(deg2rad(self.pz_spx)) * self.u_b
 
     def horizontal_tempurature_gradient(self):
         """ Calculate the horizontal tempurature gradient. 
