@@ -1,19 +1,318 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import IceMath as IM
+import scipy.special as ss
+import scipy.integrate as scint
+import scipy as scpy
+import scipy.sparse as sprs
+
+spy = 31556926.0    # seconds in a year:    s / a
 
 class IceColumn:
-    def __init__(self, z_range=[0,99], theta_0 = np.zeros(100), name=None):
+    def __init__(self, depth=-800.0, N = 50, name="Default Simulation"):
         """
-            :param z_range: The depth range
-            :param theta_0: The initial tempurature values. 
-            :param name: The name fo the IceColumn model. 
-        """
-        self.Z = np.linspace(z_range[0], z_range[-1], len(theta_0))
-        self.Theta = [theta_0] # set the initial tempurature range. 
-        self.name = name
+            Convention: The surface of the glaciar is always zero. Depths below
+                the surface are always negative. 
 
-    def plot(self, other_ice_columns = None):
+            :param depth: Expects the depth to be a negative value. If the value is positive 
+                then it will be converted a negative value. 
+            :param N: The number of nodes in the the simulation. 
+            :param name: The name of the IceColumn model. 
+        """
+        if depth > 0:
+            depth = -1 * depth
+
+        self.Z = np.linspace(0.0, depth, N)
+        self.Theta = [np.zeros(N)] # set the initial tempurature range. 
+        self.theta_s = 0.0 # degrees celcius
+        self.theta_b = 0.0 # degrees celcius
+        self.name = name
+        self.N = N
+        self.dz = np.abs(self.Z[0] - self.Z[1])
+        
+        # Set the default properties of the ice column.
+        self.g = -9.81          # earth gravity:        m/s**2
+        self.lrho = 911.0       # lowercase rho:        kg / m**3
+        self.cp = 2009.0        # heat capacity:        J / (kg * K)
+        self.beta = 9.8e-8      # pressure dependence 
+                                #  of melting point:    K / Pa
+        self.k = 2.1            # themal diffusivity:   W / (m * K)
+        self.u_s = 90.0         # horizontal surface velocity:   m / a
+        self.u_b = 0.0          # horizontal basal velocity:     m / a
+        self.aacc = -0.5        # surface mass balance: m / a
+        self.pz_spx = -0.7       # surface slope of ice: degrees
+        self.lmbda = 7.0e-3     #temp. lapse rate:      degrees / m
+        # horizonatal temperature gradient ?? -- this is confusing me!
+        self.Q_geo = 3.2e-2     #geothermal heat flow:  W / m**2
+
+        # calculate the pressure melting point for the ice sheet.
+        self.theta_pmp = -self.pressure_melting_point() #self.beta * self.lrho * (self.z_s - self.z_b)
+
+        # calcualte sigma(z)
+        self.sig_z = self.rescaled_vertical_coord()
+
+        # calcualte w(z)
+        self.w_z  = self.vertical_velocity()
+
+        # calculate phi(z)
+        self.phi_z = self.deformation_heat_sources()
+ 
+    def sim_time_settings(self, a_0=0, a_n=10000, da=100):
+        """ Set the simulation time settings in years. Defaults to ten years.
+            :param a_0: starting year
+            :param a_n: stopping year
+            :param da:  time step in years.
+        """
+        self.t_0 = a_0 * spy
+        self.t_n = a_n * spy
+        self.dt  = da  * spy
+    
+    def simulate(self):
+        """ Start the simulation. Remember to call sim_time_settings to 
+            setup the simulation params. 
+        """
+
+        # Initialize RHS variables. 
+        D = self.diffusion_matrix()
+        D[-1, -1] = -self.Q_geo
+        print D.todense()
+        A = self.advection_matrix2() / spy
+        w_z = self.w_z
+        
+        print "w_z: ", w_z
+        
+        intgr = scint.ode(self.rhs) 
+        intgr.set_integrator('vode', method='bdf')
+        intgr.set_f_params(D, A, w_z)
+        intgr.set_initial_value(self.Theta[-1], self.t_0)
+        while(intgr.t < self.t_n):
+            self.Theta.append(intgr.integrate(intgr.t + self.dt))
+
+    def diffusion_matrix(self):
+        """ Construct the diffusion matrix operator """ 
+        k  = self.k
+        lrho  = self.lrho
+        Cp = self.cp 
+        dz = self.dz
+
+        R = sprs.lil_matrix((self.N, self.N)) 
+        R.setdiag(np.ones(self.N), k=1)
+        R.setdiag(np.ones(self.N) * - 2.0)
+        R.setdiag(np.ones(self.N), k=-1)
+        R = R * k / (lrho * Cp * dz ** 2)
+        R[0,:] = np.zeros(self.N)
+        R[-1,:] = np.zeros(self.N)
+        R[0, 0] = 0.0
+        R[-1, -1] = 0.0#self.Q_geo
+
+        return R
+
+    def advection_matrix(self):
+        """ Construct the advection matrix operator """
+        M = sprs.lil_matrix((self.N, self.N))
+        dz = self.dz
+        v = -self.aacc # depth is positive in modle. Therefore 'negify' a acent
+
+        # Upwinding
+        """ Upwind formula from the wiki """
+        A = sprs.lil_matrix((self.N, self.N)) 
+        if v < 0:
+            print "v less than zero"
+            A.setdiag(np.ones(self.N) * -1.0)
+            A.setdiag(np.ones(self.N), k=1)
+        elif v == 0:
+            print "v equal to zero"
+            A = A * 0
+        elif v > 0:
+            print "v greater than zero"
+            A.setdiag(np.ones(self.N) * -1.0, k=-1)
+            A.setdiag(np.ones(self.N))
+        
+        A[0,:] = np.zeros(self.N)
+        A[-1,:] = np.zeros(self.N)
+        A[0, 0] = 0
+        A[-1, -1] = 0
+ 
+        A = A / (2 * dz)
+
+        return A
+
+    def advection_matrix2(self):
+        """ Construct the advection matrix operator """
+        M = sprs.lil_matrix((self.N, self.N))
+        dz = self.dz
+        v = -self.aacc 
+
+        B = self.advection_matrix()
+
+        A = sprs.lil_matrix((self.N, self.N))
+        A.setdiag(np.ones(self.N) *  3.0, k= 0)
+        A.setdiag(np.ones(self.N) * -4.0, k=-1)
+        A.setdiag(np.ones(self.N)       , k=-2)
+
+        
+        A[0,:] = np.zeros(self.N)
+        A[-1,:] = np.zeros(self.N)
+        A[0, 0] = 0.0
+        A[-1,-1] = 0.0
+        A = A / (2 * dz)
+        #A[-1, -1] = 10self.Q_geo
+
+        A[1,:] = B[1,:]
+        A[2,:] = B[2,:]
+
+        print A.todense()
+        return A
+        
+
+    def correct_boundary(self, theta):  
+        if theta[-1] >= self.theta_pmp:
+            theta[-1] = self.theta_pmp
+            return theta 
+        
+        theta1 = 1.0 / 3.0 * ( self.Q_geo * 2.0 * self.dz / self.k + 4.0 * theta[-2] - theta[-3])
+        #theta2 = 1.0 / 4.0 * ( self.Q_geo * 2.0 * self.dz / self.k + 3.0 * theta[-1] + theta[-3])
+        #theta3 =               self.Q_geo * 2.0 * self.dz / self.k + 3.0 * theta[-1] + theta[-2]
+
+        
+        theta[-1] = theta1
+        #theta[-2] = theta2
+        #theta[-3] = theta3
+
+        return theta
+
+    def correct_boundary2(self, theta, M):
+        if theta[-1] >= self.theta_pmp:
+            M[-1, -1] = 0.0
+        
+        return M
+
+    def rhs(self, t, y, D, A, w_z): 
+        D = self.correct_boundary2(y, D) # remove the geothermal heatflow once the tempurature is at theta_pmp
+
+
+        ptpt_d = (D * y)
+        self.check_end(ptpt_d, "D")
+        ptpt_special = 0.0
+        self.check_end(ptpt_d + ptpt_special, "S")
+        ptpt_a = (A * y * w_z)
+        self.check_end(ptpt_d + ptpt_special + ptpt_a, "A")
+        ptpt_source =  -self.phi_z / (self.lrho * self.cp) / spy
+        self.check_end(ptpt_d + ptpt_special + ptpt_a + ptpt_source, "Src")
+
+        ptpt = ptpt_d + ptpt_special + ptpt_a + ptpt_source
+
+        return ptpt
+
+    def check_end(self, ptpt, mssg):
+        if ptpt[-1] < 0.0:
+            print "---->", mssg
+            print ptpt
+            exit()
+
+
+    def TAnalytic(self):
+        """
+            z     = vector of z coordinate postions such that 0 is surface and bed is negative thickness
+            w     = vertical velocity in meters per second. also a vector of the same size as z
+            H     = ice thickness
+            ubar  = vertical average of the horizontal speed in meters per second.
+            alpha = surface slope as a ratio of rise to run.
+            lamb  = elevational lapse rate
+            Qgeo  = geothermal heat flow
+            Ts    = Surface temperature (mean annual)
+            OUTPUT:
+            T     = a vector of temperatures
+        """
+
+        z = self.Z
+        w = self.w_z / spy
+        H = self.Z[0] - self.Z[-1]
+        ubar  = self.u_s / spy #np.average([self.u_s, self.u_b]) / spy
+        alpha = deg2ratio(self.pz_spx)
+        lamb  = self.lmbda
+        Qgeo  = self.Q_geo
+        Ts    = self.theta_s 
+        k    = self.k    # Thermal conductivity of ice W/m/K
+        rhoi = self.lrho # Density of ice kg/m^3 
+        cp   = self.cp   # Heat Capacity of ice J/K/kg
+        w    = w * spy
+        ubar = ubar * spy
+        
+        #print "theta_s: ", self.theta_s
+        #print "sigma: ", self.sig_z
+        #print "w: ", w 
+        #print "w[0] - w[-1] = ", w[0] - w[-1]
+        #print "2 * H * (k/(rhoi * cp)*spy) = ", 2 * H * (k/(rhoi * cp)*spy)
+
+        xphi = np.sqrt(np.abs(w[0] - w[-1]) / (2 * H * (k/(rhoi * cp)*spy)))
+        coef = 2. * ubar * alpha * lamb * H / (w[0] - w[-1])
+        
+        T = Ts - Qgeo / (k * xphi) * np.sqrt(np.pi)/2. * \
+            (ss.erf(xphi*H) - ss.erf(xphi * (-z))) \
+            + coef * (ss.dawsn(xphi * H) - ss.dawsn(xphi * (-z)))
+
+        return [T[-1::-1]]  # Be careful with this, your coordinate system may be different.
+
+    def pressure_melting_point(self):
+        """ Pressure melting point of ice at bed 
+                $ \Theta_{PMP} = \beta \rho g(z_s - z_b) $
+            :param Z: numpy array of depths.  
+        """ 
+        return self.beta * self.lrho * (self.Z[0] - self.Z[-1])
+
+    def horizontal_velocity(self):
+        """ Horizontal ice velocity at depth
+            $ u(z) = u_s \sigma(z)^4 $ 
+
+            return a numpy array of velocities
+        """
+        return self.u_s * self.sigmoid_z()**4
+
+    def rescaled_vertical_coord(self):
+        """ Calcualte the re-scaled vertical coordinate (normalize)
+            $ \sigma(z) = \frac{z - z_b}{z_s - z_b} $ 
+
+            return a numpy array of the recaled vertical coordinates. 
+        """ 
+        return (self.Z - self.Z[-1]) / (self.Z[0] - self.Z[-1])
+
+    def vertical_velocity(self):
+        """ Vertical ice velocity  
+            $ w(z) = (\dot{a} + u_s \frac{\partial z_s}{\partial x})  \sigma(z) $
+
+            return a numpy array of the rescaled values. 
+        """
+        pz_spx = np.sin(deg2rad(self.pz_spx))
+        return (self.aacc + self.u_s * pz_spx) * self.rescaled_vertical_coord()
+
+    def vertical_shear(self):
+        """ Calculates the vertical shear.
+
+            $ frac{\partial u}{\partial z} = 4(u_s - u_b)\sigma(x)^3(z_s - z_b) $
+        """
+        return 4.0 * (self.u_s - self.u_b) * self.rescaled_vertical_coord()**3 / (self.Z[0] - self.Z[-1])
+
+    def deformation_heat_sources(self):
+        """ Calcualte the heat sources from the deformation of the ice. 
+
+            $ \rho g (z_s - z) \frac{\partial u}{\partial z} \frac{\partial z_s}{\partial x} $
+
+            return a numpy array of all of the deformation values. 
+        """
+        pz_spx = np.sin(deg2rad(self.pz_spx))
+        phi_z = self.lrho * self.g * \
+            (self.Z[0] - self.Z) * self.vertical_shear() * pz_spx 
+
+        return phi_z
+
+    def horizontal_tempurature_gradient(self):
+        """ Calculate the horizontal tempurature gradient. 
+            $\lambda \frac{\partial z_s}{\partial x}
+        """
+
+        return self.lmbda * np.sine(deg2rad(self.pz_spx))
+
+    def plot(self, other_ice_columns = None, t=-1):
         """ 
             Plots the last state of  ice column and if needed plots other ice 
             columns for comparison. 
@@ -22,11 +321,13 @@ class IceColumn:
                 plot their last states).
                 for the moment only a maximum of five can be plotted at a time.
         """
+        t = int(t)
+
         line_styles = ['-', '-', '-', '-']
         marker_styles = ['o', 'o', 'o', 'o']
         colors = ['b', 'g', 'r', 'c']
 
-        plt0, = plt.plot(self.Theta[-1], self.Z, '-sk')
+        plt0, = plt.plot(self.Theta[t], self.Z, '-sk')
         plt.xlabel("Tempurature (C)")
         plt.ylabel("Depth (m)")
 
@@ -34,7 +335,7 @@ class IceColumn:
         lbls = [self.name]
         if other_ice_columns is not None:
             for i in range(0, len(other_ice_columns)): 
-                plttmp, = plt.plot(other_ice_columns[i].Theta[-1], other_ice_columns[i].Z,
+                plttmp, = plt.plot(other_ice_columns[i].Theta[t], other_ice_columns[i].Z,
                     line_styles[i] + marker_styles[i] + colors[i]
                 )
                 plts.append(plttmp)
@@ -43,32 +344,44 @@ class IceColumn:
         plt.legend(plts, lbls)
         plt.show() 
 
-class Boundary:
-    def __init_(self):
-        self.boundaries = {}
-
-    def add_boundary(self, x, y):
-        pass
-
-def analytic():
-    data = borehole_data()
-    data[:,0] = -data[:,0] + 1
-    data = data[::-1]
-    Z = data[:, 0]
-    w = IM.upa2ups(IM.w_z(Z))
-    H = np.amax(Z) - np.amin(Z)
-    ubar = np.average(w)
-    alpha = IM.deg2ratio(IM.pz_spx)
-    lamb = IM.lmbda
-    Qgeo = IM.Q_geo
-    Ts = 0.0
-
-    theta = IM.TAnalytic(Z, w, H, ubar, lamb, alpha, Qgeo, Ts) 
-    return IceColumn([Z[0], Z[-1]], theta, "Analytical Data")
-
 def borehole():
-    data = borehole_data()
-    return IceColumn([-data[0, 0], -data[-1, 0]], borehole_data()[:,1], "Borehole Data")
+    bh_dat = borehole_data()
+    bh_dat = borehole_data()
+    bh_dat = bh_dat[-1::-1]
+    bh_dat[:, 0] = -bh_dat[:,0]
+    bh_ice = IceColumn(name="Borehole Data")
+    bh_ice.Theta = [bh_dat[:,1]]
+    bh_ice.Z = bh_dat[:,0]
+    return bh_ice
+
+# Creates a default simulation starting slate. 
+def simulation_with_borehole():
+    """ Creates a starting simulation state. The simulation uses the borehole
+        data surface and basal tempuratures for its tempuratures. The 
+        depth and number of nodes in the borehole data determines the 'z' step
+        and the maximum depth in the simulation. 
+    """
+        
+    # Initialize a blank slate. 
+    bh_dat = borehole_data()
+    bh_dat = bh_dat[-1::-1]
+    bh_dat[:, 0] = (-bh_dat[:,0]) + 1.0
+    theta_s = bh_dat[0, 1]
+    theta_b = bh_dat[-1, 1]
+    N = bh_dat.shape[0]
+    z_depth = np.min(bh_dat[:,0])
+    simu_ice = IceColumn(depth=z_depth, N=N, name="Simulated Ice")
+
+    # Set the surface and basal temps
+    simu_ice.theta_s = bh_dat[ 0, 1]
+    simu_ice.theta_b = bh_dat[-1, 1]
+    simu_ice.Theta = simu_ice.TAnalytic()
+    simu_ice.Theta[-1][0]  = bh_dat[ 0, 1]
+    simu_ice.Theta[-1][-1] = bh_dat[ 0, 1]
+
+    #print simu_ice.Theta
+
+    return simu_ice
 
 def borehole_data():
     return np.array(
@@ -114,3 +427,8 @@ def borehole_data():
     )
 
 
+def deg2rad(deg):
+    return (deg / 360.0) * np.pi * 2
+
+def deg2ratio(deg):
+    return np.sin(deg2rad(deg)) / np.cos(deg2rad(deg))
