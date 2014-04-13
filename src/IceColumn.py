@@ -42,7 +42,7 @@ class IceColumn:
         self.pz_spx = -0.7       # surface slope of ice: degrees
         self.lmbda = 7.0e-3     #temp. lapse rate:      degrees / m
         # horizonatal temperature gradient ?? -- this is confusing me!
-        self.Q_geo = 3.2e-2     #geothermal heat flow:  W / m**2
+        self.Q_geo = -3.2e-2     #geothermal heat flow:  W / m**2
 
         # calculate the pressure melting point for the ice sheet.
         self.theta_pmp = -self.pressure_melting_point() #self.beta * self.lrho * (self.z_s - self.z_b)
@@ -55,6 +55,9 @@ class IceColumn:
 
         # calculate phi(z)
         self.phi_z = self.deformation_heat_sources()
+
+        # Calcualte the horizontal ice velocities at depths
+        self.u_z = self.horizontal_velocity()
  
     def sim_time_settings(self, a_0=0, a_n=10000, da=100):
         """ Set the simulation time settings in years. Defaults to ten years.
@@ -73,16 +76,14 @@ class IceColumn:
 
         # Initialize RHS variables. 
         D = self.diffusion_matrix()
-        D[-1, -1] = -self.Q_geo
-        print D.todense()
+        D[-1, -1] = self.Q_geo
         A = self.advection_matrix2() / spy
         w_z = self.w_z
-        
-        print "w_z: ", w_z
+        u_z = self.u_z / spy
         
         intgr = scint.ode(self.rhs) 
         intgr.set_integrator('vode', method='bdf')
-        intgr.set_f_params(D, A, w_z)
+        intgr.set_f_params(D, A, w_z, u_z)
         intgr.set_initial_value(self.Theta[-1], self.t_0)
         while(intgr.t < self.t_n):
             self.Theta.append(intgr.integrate(intgr.t + self.dt))
@@ -164,42 +165,49 @@ class IceColumn:
         return A
         
 
-    def correct_boundary(self, theta):  
+    #def correct_boundary(self, theta):  
+    #    if theta[-1] >= self.theta_pmp:
+    #        theta[-1] = self.theta_pmp
+    #        return theta 
+    #    
+    #    theta1 = 1.0 / 3.0 * ( self.Q_geo * 2.0 * self.dz / self.k + 4.0 * theta[-2] - theta[-3])
+    #    #theta2 = 1.0 / 4.0 * ( self.Q_geo * 2.0 * self.dz / self.k + 3.0 * theta[-1] + theta[-3])
+    #    #theta3 =               self.Q_geo * 2.0 * self.dz / self.k + 3.0 * theta[-1] + theta[-2]
+
+    #    
+    #    theta[-1] = theta1
+    #    #theta[-2] = theta2
+    #    #theta[-3] = theta3
+
+    #    return theta
+
+    def correct_boundary(self, theta, M):
         if theta[-1] >= self.theta_pmp:
             theta[-1] = self.theta_pmp
-            return theta 
-        
-        theta1 = 1.0 / 3.0 * ( self.Q_geo * 2.0 * self.dz / self.k + 4.0 * theta[-2] - theta[-3])
-        #theta2 = 1.0 / 4.0 * ( self.Q_geo * 2.0 * self.dz / self.k + 3.0 * theta[-1] + theta[-3])
-        #theta3 =               self.Q_geo * 2.0 * self.dz / self.k + 3.0 * theta[-1] + theta[-2]
-
-        
-        theta[-1] = theta1
-        #theta[-2] = theta2
-        #theta[-3] = theta3
-
-        return theta
-
-    def correct_boundary2(self, theta, M):
-        if theta[-1] >= self.theta_pmp:
             M[-1, -1] = 0.0
         
-        return M
+        return (M, theta)
 
-    def rhs(self, t, y, D, A, w_z): 
-        D = self.correct_boundary2(y, D) # remove the geothermal heatflow once the tempurature is at theta_pmp
+    def rhs(self, t, y, D, A, w_z, u_z): 
+        D, y = self.correct_boundary(y, D) # remove the geothermal heatflow once the tempurature is at theta_pmp
 
 
         ptpt_d = (D * y)
         self.check_end(ptpt_d, "D")
-        ptpt_special = 0.0
+        
+        pz_spx = np.sin(deg2rad(self.pz_spx))
+        ptpt_special = self.lmbda * pz_spx * u_z
         self.check_end(ptpt_d + ptpt_special, "S")
+
         ptpt_a = (A * y * w_z)
         self.check_end(ptpt_d + ptpt_special + ptpt_a, "A")
+
         ptpt_source =  -self.phi_z / (self.lrho * self.cp) / spy
         self.check_end(ptpt_d + ptpt_special + ptpt_a + ptpt_source, "Src")
 
         ptpt = ptpt_d + ptpt_special + ptpt_a + ptpt_source
+
+        ptpt[0] = 0.0
 
         return ptpt
 
@@ -266,7 +274,8 @@ class IceColumn:
 
             return a numpy array of velocities
         """
-        return self.u_s * self.sigmoid_z()**4
+        #return self.u_s * self.sigmoid_z()**4
+        return (self.u_s - self.u_b) * self.rescaled_vertical_coord()**4 + self.u_b
 
     def rescaled_vertical_coord(self):
         """ Calcualte the re-scaled vertical coordinate (normalize)
