@@ -309,7 +309,7 @@ class IceColumn:
         z = self.Z
         w = self.w_z / spy
         H = self.Z[0] - self.Z[-1]
-        ubar  = self.u_s / spy #np.average([self.u_s, self.u_b]) / spy
+        ubar  = (self.u_b + 0.8 * (self.u_s - self.u_b)) / spy #np.average([self.u_s, self.u_b]) / spy
         alpha = deg2ratio(self.pz_spx)
         lamb  = self.lmbda
         Qgeo  = self.Q_geo
