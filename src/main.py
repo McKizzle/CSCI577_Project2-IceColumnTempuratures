@@ -7,21 +7,32 @@ import yaml
 
 def main():
     borehole_ice = IC.borehole()
+    analytic_ice = IC.simulation_with_borehole() 
+    analytic_ice.Theta = analytic_ice.TAnalytic()
+    analytic_ice.name = "Analytic Model"
     
     # Optimize
-    ictmzr = IC.Icetimizer()
-    ictmzr.simulator.sim_time_settings()
-    ictmzr.optimize()
+    #ictmzr = IC.Icetimizer()
+    #ictmzr.simulator.sim_time_settings()
+    #ictmzr.optimize()
 
-    solution = ictmzr.simulator
-    solution.plot([borehole_ice])
-    plt.savefig("optimal_temp_curve.png")
-    plt.close()
-    
-    #Write to file. 
-    results = ictmzr.results_as_dict()
-    with open('results.yml', 'w') as outfile:
-        outfile.write(yaml.dump(results, default_flow_style=True))
+    #solution = ictmzr.simulator
+    #solution.plot([borehole_ice])
+    #plt.savefig("optimal_temp_curve.png")
+    #plt.close()
+    #
+    ##Write to file. 
+    #results = ictmzr.results_as_dict()
+    #with open('results.yml', 'w') as outfile:
+    #    outfile.write(yaml.dump(results, default_flow_style=True))
+
+    simu_ice = IC.simulation_with_borehole()
+    simu_ice.sim_params(3.492157280445099, -0.00354685932397887)
+    simu_ice.sim_time_settings()
+    simu_ice.simulate()
+    simu_ice.plot([borehole_ice, analytic_ice])
+    plt.title("Simulation vs Real Data")
+    plt.show()
 
 def animate1Dframes(x, data):
     """ Animates a 2D array of data using pyplot. 
