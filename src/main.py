@@ -19,11 +19,7 @@ def main():
     plt.close()
     
     #Write to file. 
-    results = {
-        "u_b" : ictmzr.u_b,
-        "aacc" : ictmzr.aacc,
-        "error": ictmzr.err
-    }
+    results = ictmzr.results_as_dict()
     with open('results.yml', 'w') as outfile:
         outfile.write(yaml.dump(results, default_flow_style=True))
 

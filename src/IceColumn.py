@@ -433,18 +433,42 @@ class Icetimizer():
         self.golden = golden
         self.u_b = 10.0
         self.aacc= -.5
-        self.err = None
+        self.fopt = None
+        self.iters= None
+        self.funcalls = None
+        self.warnflag = None
+        self.allvects = None
+        self.xtol=.001
+        self.ftol=.001
+
+    def results_as_dict(self):
+        results = {
+            "Basal Velocity (m/a)"      : self.u_b,
+            "Accumulation Rate (m/a)"   : self.aacc,
+            "Minimum Error"             : self.fopt,
+            "Iterations"                : self.iters,
+            "Function Calls"            : self.funcalls,
+            "Warning Flag"              : self.warnflag,
+            "Error at Each Iteration"   : self.allvects,
+            "Xtol"                      : self.xtol,
+            "Ftol"                      : self.ftol
+        }
+
+        return results
 
     def optimize(self, u_b0=10.0, aacc_0=-.5):
         """ Calls scipy's optimize function on the simulation. """
         import scipy.optimize as sopty
 
-        xopt = sopty.fmin(self.to_optimize, [u_b0, aacc_0])
+        xopt, fopt, iters, funcalls, allvecs = sopty.fmin(self.to_optimize, [u_b0, aacc_0], 
+            xtol=self.xtol, ftol=self.ftol, full_output=1)
 
-        self.u_b = xopt[0]
-        self.aacc= xopt[1]
-
-        return xopt
+        self.u_b  = float(xopt[0])
+        self.aacc = float(xopt[1])
+        self.fopt = float(fopt)
+        self.iters= int(iters)
+        self.funcalls = int(funcalls)
+        self.allvects = allvecs
 
     def to_optimize(self, params):
         """ Function that is passed into fmin. Serves as a wrapper for the
@@ -453,9 +477,8 @@ class Icetimizer():
         self.simulator.sim_params(params[0], params[1])
         self.simulator.simulate()
 
-        self.err = self.error(self.golden.Theta[-1], self.simulator.Theta[-1])
-        print "Error: %f:", self.err
-        return self.err
+        return self.error(self.golden.Theta[-1], self.simulator.Theta[-1])
+
 
 
     def error(self, golden, simulated):
