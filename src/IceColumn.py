@@ -168,28 +168,22 @@ class IceColumn:
 
         #update everything to reflect the changes. 
         self.Q_f = -self.frictional_heat() / spy
-        #print "Frictional Heat: ", self.Q_f / spy
-        #print "Geothermal Heat: ", self.Q_geo
         self.Q_total = self.Q_geo + self.Q_f
 
         # calculate the pressure melting point for the ice sheet.
         self.theta_pmp = self.pressure_melting_point() #self.beta * self.lrho * (self.z_s - self.z_b)
-        #print "Pressure Melting Point: ", self.theta_pmp
 
         # calcualte sigma(z)
         self.sig_z = self.rescaled_vertical_coord()
 
         # calcualte w(z)
         self.w_z  = self.vertical_velocity()
-        #print "Vertical Velocities", self.w_z 
 
         # calculate phi(z)
         self.phi_z = self.deformation_heat_sources()
-        #print "Deformation heat sources: ", self.phi_z
 
         # Calcualte the horizontal ice velocities at depths
         self.u_z = self.horizontal_velocity() 
-        #print "Horizontal Velocity: ", self.u_z
     
     def simulate(self):
         """ Start the simulation. Remember to call sim_time_settings to 
@@ -248,13 +242,12 @@ class IceColumn:
         elif v > 0:
             A.setdiag(np.ones(self.N) * -1.0, k=-1)
             A.setdiag(np.ones(self.N))
-        
+
         A[0,:] = np.zeros(self.N)
         A[-1,:] = np.zeros(self.N)
         A = A / (2 * dz)
         
-        # Set up the final row so that it can handle the 
-        # diffusion from the Q_geo
+        # Set up the final row so that it can handle the base of the system. 
         B = sprs.lil_matrix((self.N, self.N))
         B.setdiag(np.ones(self.N) *  3.0, k= 0)
         B.setdiag(np.ones(self.N) * -4.0, k=-1)
@@ -265,6 +258,14 @@ class IceColumn:
         return A 
 
     def correct_boundary(self, theta, M):
+        """ Correct boundary takes in a matrix a vector of theta values
+            and a matrix M. It assumes that is a diffusion matrix. If the
+            basal temp has reached its melting point remove the geo thermal
+            heat as a source. Return a tuple of the modified theta and 
+            matrix. 
+            :param theta: numpy array of tempuratures.
+            :param M: the diffusion matrix. 
+        """
         if theta[-1] >= self.theta_pmp:
             theta[-1] = self.theta_pmp
             M[-1, -1] = 0.0
@@ -272,21 +273,17 @@ class IceColumn:
         return (M, theta)
 
     def rhs(self, t, y, D, A, w_z, u_z): 
-        D, y = self.correct_boundary(y, D) # remove the geothermal heatflow once the tempurature is at theta_pmp
+        # remove the geothermal heatflow once the tempurature is at theta_pmp
+        D, y = self.correct_boundary(y, D) 
 
         ptpt_d = (D * y)
-
         pz_spx = np.sin(deg2rad(self.pz_spx))
         ptpt_special = self.lmbda * pz_spx * u_z
-
         ptpt_a = (A * y * w_z)
-
         ptpt_source =  -self.phi_z / (self.lrho * self.cp) / spy
-
         ptpt = ptpt_d + ptpt_special + ptpt_a + ptpt_source
 
-        ptpt[0] = 0.0
-
+        ptpt[0] = 0.0 # lock the surface temp.
         return ptpt
 
     def check_end(self, ptpt, mssg):
@@ -307,9 +304,8 @@ class IceColumn:
             Qgeo  = geothermal heat flow
             Ts    = Surface temperature (mean annual)
             OUTPUT:
-            T     = a vector of temperatures
+            T     = a vector of temperatures (almost)
         """
-
         z = self.Z
         w = self.w_z / spy
         H = self.Z[0] - self.Z[-1]
@@ -322,14 +318,7 @@ class IceColumn:
         rhoi = self.lrho # Density of ice kg/m^3 
         cp   = self.cp   # Heat Capacity of ice J/K/kg
         w    = w * spy
-        ubar = ubar * spy
-        
-        #print "theta_s: ", self.theta_s
-        #print "sigma: ", self.sig_z
-        #print "w: ", w 
-        #print "w[0] - w[-1] = ", w[0] - w[-1]
-        #print "2 * H * (k/(rhoi * cp)*spy) = ", 2 * H * (k/(rhoi * cp)*spy)
-
+        ubar = ubar * spy 
         xphi = np.sqrt(np.abs(w[0] - w[-1]) / (2 * H * (k/(rhoi * cp)*spy)))
         coef = 2. * ubar * alpha * lamb * H / (w[0] - w[-1])
         
@@ -433,12 +422,11 @@ class IceColumn:
                 lbls.append(other_ice_columns[i].name)
         
         plt.legend(plts, lbls)
-        plt.show() 
 
 class Icetimizer():
     def __init__(self, simulator=simulation_with_borehole(), golden=borehole()):
         """ Serves as a wrapper function for scipy's fmin function. 
-            :param simulated: An IceColumn object that will be simulated. 
+            :param simulated: An IceColumn object that will be simulated.
             :param golden: An IceColumn object that has the real data. 
         """
         self.simulator = simulator
@@ -447,7 +435,7 @@ class Icetimizer():
         self.aacc= -.5
 
     def optimize(self, u_b0=10.0, aacc_0=-.5):
-        """ Calls scipy's optimize function. """
+        """ Calls scipy's optimize function on the simulation. """
         import scipy.optimize as sopty
 
         xopt = sopty.fmin(self.to_optimize, [u_b0, aacc_0])
@@ -458,6 +446,9 @@ class Icetimizer():
         return xopt
 
     def to_optimize(self, params):
+        """ Function that is passed into fmin. Serves as a wrapper for the
+            simulation
+        """
         self.simulator.sim_params(params[0], params[1])
         self.simulator.simulate()
 
@@ -467,6 +458,7 @@ class Icetimizer():
 
 
     def error(self, golden, simulated):
+        """ Square root of the sum squares of two numpy vectors """
         return np.sqrt(np.sum((golden - simulated)**2))
 
 
