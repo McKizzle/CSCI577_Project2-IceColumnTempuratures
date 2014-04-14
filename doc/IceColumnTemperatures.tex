@@ -39,23 +39,38 @@
                                               -u(z) \frac{\partial \theta}{\partial x}
                                               +\frac{\phi(z)}{\rho C_p}
     \end{align*} 
-    There are four main components to the equation. The first component $\frac{k}{\rho C_p} \frac{\partial^2 \theta}{\partial z^2}$ models the diffusion of the temperature in the ice. At a minimum, there will be a straight temperature gradient between the basal and the surface temperatures.
+    There are four main components to the equation. 
+    The first component $\frac{k}{\rho C_p} \frac{\partial^2 \theta}{\partial z^2}$ models the diffusion of the temperature in the ice. 
+    At a minimum, there will be a straight temperature gradient between the basal and the surface temperatures.
 
-    The next piece, $w(z) \frac{\partial \theta}{\partial z}$ is the flow of the temperature in the ice. Since, there is precipitation that accumulates at the surface of the ice, the ice will begin ``flowing'' down. In effect, the temperature is transfered downwards towards the base of the ice. The flow downwards is not consistent, instead it decreases with depth. Representing the vertical velocities is achieved with $w(z)$
+    The next piece, $w(z) \frac{\partial \theta}{\partial z}$ is the flow of the temperature in the ice. 
+    Since, there is precipitation that accumulates at the surface of the ice, the ice will begin ``flowing'' down. 
+    In effect, the temperature is transfered downwards towards the base of the ice. 
+    The flow downwards is not consistent, instead it decreases with depth. Representing the vertical velocities is achieved with $w(z)$
     \begin{align*}
         w(z) &= (\dot{a} + u_s \frac{\partial z_s}{\partial x}) \sigma(z)
     \end{align*}
-    The main variable of interest is $\dot{a}$, which represents the precipitation accumulation rate. The other variables $u_s$ and $\frac{\partial z_s}{\partial x}$, represent the horizontal surface velocity and the surface slope of the ice. The last variable $\sigma(z)$ returns a normalized set of depths in the glacier. 
+    The main variable of interest is $\dot{a}$, which represents the precipitation accumulation rate. 
+    The other variables $u_s$ and $\frac{\partial z_s}{\partial x}$, represent the horizontal surface velocity and the surface slope of the ice. 
+    The last variable $\sigma(z)$ returns a normalized set of depths in the glacier. 
 
-    The third component $u(z) \frac{\partial \theta}{\partial x}$ represents transfer of heat caused by the horizontal flow of the glacier. Since this model represents a one-dimensional system in the depth direction of the glacier, it forces this term to become static vector of velocities at increasing depths. The decrease of horizontal velocity at the increase of depth is called the horizontal shear of the glacier. 
+    The third component $u(z) \frac{\partial \theta}{\partial x}$ represents transfer of heat caused by the horizontal flow of the glacier. 
+    Since this model represents a one-dimensional system in the depth direction of the glacier, it forces this term to become static vector of velocities at increasing depths. 
+    The decrease of horizontal velocity at the increase of depth is called the horizontal shear of the glacier. 
 
-    Last, we have the source term $\frac{\phi(z)}{\rho C_p}$. Like with the previous component, it is also a static representation of the heat generated from the deformation of the ice. The heat generated increases with the depth as the pressure increases. 
+    Last, we have the source term $\frac{\phi(z)}{\rho C_p}$. 
+    Like with the previous component, it is also a static representation of the heat generated from the deformation of the ice. 
+    The heat generated increases with the depth as the pressure increases. 
 
-    The partial differential equation may be able to simulate the ice, but there are a few false assumptions. The first is that the ice does not flow at the base. To restructure the formula to reflect this change, $u(z)$ becomes:
+    The partial differential equation may be able to simulate the ice, but there are a few false assumptions.   
+    The first is that the ice does not flow at the base. 
+    To restructure the formula to reflect this change, $u(z)$ becomes:
     \begin{align*}
         u(z) = u_b + 0.8(u_s - u_b)
     \end{align*}
-    Where $u_s$ and $u_b$ represent the horizontal surface and basal velocities. Next, we must be aware that any sliding object is going to produce heat as a byproduct of friction. To account for this we need to incorporate an additional heat source at the base of the glacier.  
+    Where $u_s$ and $u_b$ represent the horizontal surface and basal velocities. 
+    Next, we must be aware that any sliding object is going to produce heat as a byproduct of friction. 
+    To account for this we need to incorporate an additional heat source at the base of the glacier.  
     \begin{align*}
         Q_f = \rho g (z_s - z_b) \frac{\partial z_s}{\partial z} u_b
     \end{align*}  
@@ -69,26 +84,34 @@
 
     \subsection{Objective}
     Using the equation to model the system. 
-    The goal of this project is to find the optimal values for $\dot{a}$ and $u_b$ such that the sum squared error between the system and actual data is minimized. This goal will be achieved with the simplex algorithm. 
+    The goal of this project is to find the optimal values for $\dot{a}$ and $u_b$ such that the sum squared error between the simulation temperatures and the actual data is minimized. 
+    The simplex algorithm will be used to find the optimal values.  
 
     \subsection{Program}
     The program itself consists of two files.
     \begin{description}
-        \item[main.py] Main execution script. Calls all the necessary modules to find an optimal solution for $\dot{a}$ and $u_s$.
+        \item[main.py] Main execution script. 
+        Calls all the necessary modules to find an optimal solution for $\dot{a}$ and $u_s$.
         \item[IceColumn.py] 
         \begin{description}
-            \item[IceColumn] Contains all of the logic to run the simulation. The diffusion matrix is calculated in the {\it diffusion\_matrix } method and the advection matrix is calculated in the {\it advection\_matrix} method. 
+            \item[IceColumn] Contains all of the logic to run the simulation. 
+            The diffusion matrix is calculated in the {\it diffusion\_matrix } method and the advection matrix is calculated in the {\it advection\_matrix} method. 
             \item[Icetimizer] Serves as a wrapper for the {\it scipy.optimize.fmin } function. 
         \end{description}
+        \item[results.yml] Contains output from {\it scipy.optimize.fmin}. 
     \end{description}
 
     %%Verification------------------------------------------------------------------------------------
     \section{Verification of Program}
-    To verify the accuracy of the simulation. It was compared against an actual dataset consisting of temperature samples from a glacier. The simplex algorithm was used to find an optimal $\dot{a}$ and $u_b$ such that the simulation fits closely to the real data. 
+    To verify the accuracy of the simulation. 
+    It was compared against an actual dataset consisting of temperature samples from a glacier. 
+    The simplex algorithm was used to find an optimal $\dot{a}$ and $u_b$ such that the simulation fits closely to the real data. 
+
+    Finding an optimal $\dot{a}$ and $u_b$ required 178 iterations of the {\it fmin} function (which exceeded the maximum allowed iterations). The minimum sum squared error found was $~5.50$ and this was achieved by setting $\dot{a} = 3.55x10^-3$ and $u_b = 3.49$. $ftol$ and $xtol$ for {\it fmin} were set to 0.001.
 
     %%Data--------------------------------------------------------------------------------------------
     \section{Data}
-    The original data and data produced by the simulation. 
+    The original data and data produced by the simulation can be found in Tables 1 \& 2. 
     \begin{table}[h!]
         \centering
         \begin{tabular}{c|c}
@@ -183,7 +206,7 @@
               -1. & -9.6111923  \\   
 
         \end{tabular}
-        \caption{The simulated dataset using the optimized parameters $\dot{a} = 0.00355 m/a$ and $u_b = 3.49 m/a$.}
+        \caption{The simulated dataset using the optimized parameters $\dot{a} = 0.00355 ^m/_y$ and $u_b = 3.49 ^m/_y$.}
     \end{table}
 
     
@@ -192,13 +215,13 @@
     \begin{figure}[h!]
         \centering
         \includegraphics[width=0.48\textwidth]{../img/Simulation_vs_Real.png}
-        \caption{Simulation curve compared to the actual temperature curve. $\dot{a} = 0.00355 m/a$ and $u_b = 3.49 m/a$}
+        \caption{Simulation curve compared to the actual temperature curve. $\dot{a} = 0.00355 ^m/_y$ and $u_b = 3.49 ^m/_y$}
     \end{figure}
     
     \begin{figure}[h!]
         \centering
         \includegraphics[width=0.48\textwidth]{../img/bad_analytic.png}
-        \caption{Could not get the analytic solution to behave.$\dot{a} = 0.00355 m/a$ and $u_b = 3.49 m/a$}
+        \caption{Could not get the analytic solution to behave. $\dot{a} = 0.00355 ^m/_y$ and $u_b = 3.49 ^m/_y$}
     \end{figure}
 
     
@@ -213,7 +236,7 @@
 
     %%Critique---------------------------------------------------------------------------
     \section{Critique} 
-    This is not really a critique, but there was a lot of variables to keep track of. Other than that the project was project was enjoyable. There is a single recommendation, post up the code showing what you plugged into your analytical function. I spent a fourth of the time on this project struggling with it. On the positive side, I spent a fourth of the time learning about the analytical solution.  
+    This is not really a critique, but there was a lot of variables to keep track of. Other than that the project was project was enjoyable. There is a single recommendation, post up the code showing what you plugged into your analytical function. i
 
     %%Bibliography-----------------------------------------------------------------------
     \begin{thebibliography}{1}

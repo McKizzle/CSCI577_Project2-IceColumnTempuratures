@@ -33,6 +33,7 @@ def main():
     simu_ice.plot([borehole_ice, analytic_ice])
     plt.title("Simulation vs Real Data")
     plt.show()
+    animate1Dframes(simu_ice.Z, simu_ice.Theta)
 
 def animate1Dframes(x, data):
     """ Animates a 2D array of data using pyplot. 
