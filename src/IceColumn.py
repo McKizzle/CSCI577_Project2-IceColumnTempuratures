@@ -433,6 +433,7 @@ class Icetimizer():
         self.golden = golden
         self.u_b = 10.0
         self.aacc= -.5
+        self.err = None
 
     def optimize(self, u_b0=10.0, aacc_0=-.5):
         """ Calls scipy's optimize function on the simulation. """
@@ -452,9 +453,9 @@ class Icetimizer():
         self.simulator.sim_params(params[0], params[1])
         self.simulator.simulate()
 
-        err = self.error(self.golden.Theta[-1], self.simulator.Theta[-1])
-        print "Error: %f:", err 
-        return err
+        self.err = self.error(self.golden.Theta[-1], self.simulator.Theta[-1])
+        print "Error: %f:", self.err
+        return self.err
 
 
     def error(self, golden, simulated):

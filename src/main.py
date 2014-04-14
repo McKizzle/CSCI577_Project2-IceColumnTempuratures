@@ -6,6 +6,8 @@ import time as tm
 import yaml
 
 def main():
+    borehole_ice = IC.borehole()
+    
     # Optimize
     ictmzr = IC.Icetimizer()
     ictmzr.simulator.sim_time_settings()
@@ -19,7 +21,8 @@ def main():
     #Write to file. 
     results = {
         "u_b" : ictmzr.u_b,
-        "aacc" : ictmzr.aacc
+        "aacc" : ictmzr.aacc,
+        "error": ictmzr.err
     }
     with open('results.yml', 'w') as outfile:
         outfile.write(yaml.dump(results, default_flow_style=True))
